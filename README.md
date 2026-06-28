@@ -9,23 +9,9 @@
 <img alt="SQLite" src="https://img.shields.io/badge/SQLite-Local%20Database-a3b19b?style=for-the-badge&logo=sqlite&logoColor=white">
 <img alt="Streamlit" src="https://img.shields.io/badge/Streamlit-Dashboard-f4f1ea?style=for-the-badge&logo=streamlit&logoColor=111111">
 
-<br>
-
-<b>Palette:</b> Sand · Desert Sage · Burnt Sienna · Black editorial typography
+<br> live dashboard: https://ride-hail-demand-forecasting.streamlit.app/
 
 </div>
-
----
-
-## Dashboard Preview
-
-![Ride-hail dashboard map preview](assets/dashboard-map-preview.jpg)
-
-<div align="center">
-  <i>Interactive Streamlit dashboard with readable community-area filters, demand KPIs, and a Chicago demand choropleth.</i>
-</div>
-
----
 
 ## About This Project
 
@@ -66,17 +52,6 @@ The project mirrors a real mobility product data science workflow:
 
 </div>
 
----
-
-## Product Questions This Answers
-
-- **Where is ride demand concentrated across Chicago community areas?**
-- **How does demand change over time by zone, weekday, and hour?**
-- **How accurately can a model forecast hourly pickup demand?**
-- **How much did major events, such as COVID lockdowns or storms, shift demand?**
-- **Did the selected zone change more than comparable control zones?**
-
----
 
 ## Pipeline
 
