@@ -120,21 +120,18 @@ def community_area_lookup() -> pd.DataFrame:
     geojson = load_community_area_geojson()
     return pd.DataFrame(
         [
-            {
-                "zone_id": int(feature["properties"].get("area_numbe")),
-                "zone_id_str": feature["properties"].get("area_numbe"),
-                "community": str(feature["properties"].get("community", "Unknown")).title(),
-            }
+            {"zone_id": int(feature["properties"].get("area_numbe")), "zone_id_str": feature["properties"].get("area_numbe"), "community": str(feature["properties"].get("community", "Unknown")).title()}
             for feature in geojson["features"]
             if feature["properties"].get("area_numbe") is not None
         ]
     )
 
 
-def pct_delta(current: float, previous: float | None) -> str | None:
-    if previous is None or previous == 0 or pd.isna(previous):
+def pct_delta(current: float, previous: float | None, label: str = "vs previous period") -> str | None:
+    """Return a readable percentage delta for comparable rate-style metrics."""
+    if previous is None or previous == 0 or pd.isna(previous) or pd.isna(current):
         return None
-    return f"{(current - previous) / previous * 100:+.1f}% vs prior window"
+    return f"{(current - previous) / previous * 100:+.1f}% {label}"
 
 
 if not DB_PATH.exists():
@@ -229,17 +226,18 @@ selected_trips = int(filtered["trip_count"].sum()) if len(filtered) else 0
 
 previous_start = start - (end - start)
 previous = hourly[(hourly["zone_id"] == zone_id) & (hourly["datetime_hour"] >= previous_start) & (hourly["datetime_hour"] < start)]
-prev_trips = int(previous["trip_count"].sum()) if len(previous) else None
-prev_rows = len(previous) if len(previous) else None
 prev_avg = float(previous["trip_count"].mean()) if len(previous) else None
 prev_peak = float(previous["trip_count"].max()) if len(previous) else None
+current_avg = float(filtered["trip_count"].mean()) if len(filtered) else np.nan
+current_peak = float(filtered["trip_count"].max()) if len(filtered) else np.nan
 
 col1, col2, col3, col4, col5 = st.columns(5)
-col1.metric("Trips", f"{selected_trips:,}", pct_delta(selected_trips, prev_trips))
-col2.metric("Hourly rows", f"{len(filtered):,}", pct_delta(len(filtered), prev_rows))
-col3.metric("Avg hourly trips", f"{filtered['trip_count'].mean():.1f}" if len(filtered) else "n/a", pct_delta(float(filtered["trip_count"].mean()) if len(filtered) else np.nan, prev_avg))
-col4.metric("Peak hourly trips", f"{filtered['trip_count'].max():,.0f}" if len(filtered) else "n/a", pct_delta(float(filtered["trip_count"].max()) if len(filtered) else np.nan, prev_peak))
+col1.metric("Trips", f"{selected_trips:,}")
+col2.metric("Hourly rows", f"{len(filtered):,}")
+col3.metric("Avg hourly trips", f"{current_avg:.1f}" if len(filtered) else "n/a", pct_delta(current_avg, prev_avg, "vs previous equal window"))
+col4.metric("Peak hourly trips", f"{current_peak:,.0f}" if len(filtered) else "n/a", pct_delta(current_peak, prev_peak, "vs previous equal window"))
 col5.metric("Model R²", "n/a" if np.isnan(r2) else f"{r2:.3f}", None if np.isnan(naive_r2) else f"naive {naive_r2:.3f}")
+st.caption("Deltas are only shown for rate-style KPIs and compare against the immediately preceding equal-length time window.")
 
 if len(filtered) < 2:
     st.warning("This zone/date selection has very little data. Expand the date window or choose another pickup area.")
@@ -268,14 +266,7 @@ try:
         hover_data={"zone_id_str": False, "trip_count": ":,", "community": False},
         title="Total trips by Chicago community area in selected date window",
     )
-    fig_map.update_layout(
-        margin={"r": 0, "t": 42, "l": 0, "b": 0},
-        height=610,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font={"color": "#111111", "family": "Inter"},
-        coloraxis_colorbar={"title": {"text": "Trips", "font": {"color": "#111111"}}, "tickfont": {"color": "#111111"}},
-    )
+    fig_map.update_layout(margin={"r": 0, "t": 42, "l": 0, "b": 0}, height=610, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font={"color": "#111111", "family": "Inter"}, coloraxis_colorbar={"title": {"text": "Trips", "font": {"color": "#111111"}}, "tickfont": {"color": "#111111"}})
     st.plotly_chart(fig_map, width="stretch")
 except Exception as exc:
     st.warning(f"Map could not load from Chicago boundary GeoJSON: {exc}")
@@ -307,10 +298,7 @@ if preds is not None:
     perf2.metric("Naive MAE", "n/a" if np.isnan(naive_mae) else f"{naive_mae:.2f}")
     perf3.metric("R²", f"{r2:.3f}" if not np.isnan(r2) else "n/a")
     perf4.metric("MAE improvement", "n/a" if np.isnan(mae_improvement) else f"{mae_improvement:+.1f}%")
-    comparison = pd.DataFrame([
-        {"Model": "Random forest", "MAE": mae, "RMSE": rmse, "R²": r2},
-        {"Model": "Naive previous-hour", "MAE": naive_mae, "RMSE": naive_rmse, "R²": naive_r2},
-    ])
+    comparison = pd.DataFrame([{"Model": "Random forest", "MAE": mae, "RMSE": rmse, "R²": r2}, {"Model": "Naive previous-hour", "MAE": naive_mae, "RMSE": naive_rmse, "R²": naive_r2}])
     st.dataframe(comparison, hide_index=True, width="stretch")
     plot_limit = float(np.nanpercentile(np.concatenate([preds["trip_count"].values, preds["prediction"].values]), 99))
     scatter_df = preds[(preds["trip_count"] <= plot_limit) & (preds["prediction"] <= plot_limit)].copy()
@@ -368,10 +356,8 @@ else:
     st.info("Not enough data to compute DiD for this event/window.")
 
 with st.expander("Method note"):
-    st.markdown(
-        """
+    st.markdown("""
         The DiD estimate is a simple exploratory causal statistic, not a final academic causal claim.
         It uses the selected pickup zone as the treated unit and all other zones as controls, then compares
         how the treated zone changed relative to the control-zone average over the same event window.
-        """
-    )
+        """)
