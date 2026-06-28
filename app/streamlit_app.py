@@ -15,26 +15,89 @@ from src.config import DB_PATH, MODELS_DIR
 from src.data_pipeline import build_database, load_hourly_demand
 
 st.set_page_config(page_title="Ride-Hail Demand Forecasting", layout="wide")
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+    :root {
+        --sand: #f4f1ea;
+        --sage: #a3b19b;
+        --sienna: #d48c46;
+        --ink: #111111;
+        --soft-ink: #3a332c;
+        --card: #fffdf8;
+    }
+
+    .stApp {
+        background: var(--sand);
+        color: var(--ink);
+        font-family: 'Inter', sans-serif;
+    }
+
+    h1, h2, h3 {
+        font-family: 'Cormorant Garamond', serif !important;
+        color: var(--ink) !important;
+        letter-spacing: -0.015em;
+        font-weight: 700 !important;
+    }
+
+    p, li, label, span, div, .stMarkdown {
+        color: var(--ink);
+    }
+
+    [data-testid="stMetric"] {
+        background: var(--card);
+        border: 1px solid rgba(163, 177, 155, 0.55);
+        border-radius: 16px;
+        padding: 14px 16px;
+        box-shadow: 0 10px 28px rgba(58, 51, 44, 0.06);
+    }
+
+    [data-testid="stMetricLabel"] p {
+        color: var(--soft-ink) !important;
+        font-family: 'Inter', sans-serif;
+        font-weight: 600;
+    }
+
+    [data-testid="stMetricValue"] {
+        color: var(--ink) !important;
+        font-family: 'Cormorant Garamond', serif;
+        font-weight: 700;
+    }
+
+    [data-testid="stMetricDelta"] {
+        color: var(--sienna) !important;
+    }
+
+    [data-testid="stSidebar"] {
+        background: #ebe6db;
+        border-right: 1px solid rgba(163, 177, 155, 0.75);
+    }
+
+    div[data-testid="stExpander"] {
+        border: 1px solid rgba(163, 177, 155, 0.65);
+        border-radius: 14px;
+        background: rgba(255, 253, 248, 0.78);
+    }
+
+    .stCaption, caption, small {
+        color: var(--soft-ink) !important;
+    }
+
+    a { color: var(--sienna) !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 st.title("Ride-Hail Demand Forecasting & Event Impact Dashboard")
 st.caption("Analyzing 500k+ Chicago public trips across 2020–2023 to forecast demand and measure event impact")
 
 EVENT_PRESETS = {
-    "COVID emergency declaration — 2020-03-13": {
-        "date": "2020-03-13",
-        "note": "Shock to citywide mobility after the national emergency declaration.",
-    },
-    "Major winter storm — 2022-12-22": {
-        "date": "2022-12-22",
-        "note": "Severe winter weather disrupted Chicago travel before Christmas.",
-    },
-    "Lollapalooza 2023 starts — 2023-08-03": {
-        "date": "2023-08-03",
-        "note": "Large downtown event likely to shift demand patterns near central zones.",
-    },
-    "Thanksgiving travel week — 2023-11-22": {
-        "date": "2023-11-22",
-        "note": "Holiday travel period with airport and nightlife demand shifts.",
-    },
+    "COVID emergency declaration — 2020-03-13": {"date": "2020-03-13", "note": "Shock to citywide mobility after the national emergency declaration."},
+    "Major winter storm — 2022-12-22": {"date": "2022-12-22", "note": "Severe winter weather disrupted Chicago travel before Christmas."},
+    "Lollapalooza 2023 starts — 2023-08-03": {"date": "2023-08-03", "note": "Large downtown event likely to shift demand patterns near central zones."},
+    "Thanksgiving travel week — 2023-11-22": {"date": "2023-11-22", "note": "Holiday travel period with airport and nightlife demand shifts."},
     "Custom date": {"date": None, "note": "Choose any date within the available data window."},
 }
 
@@ -50,6 +113,22 @@ def load_community_area_geojson():
     response = requests.get(url, timeout=30)
     response.raise_for_status()
     return response.json()
+
+
+@st.cache_data(show_spinner=False)
+def community_area_lookup() -> pd.DataFrame:
+    geojson = load_community_area_geojson()
+    return pd.DataFrame(
+        [
+            {
+                "zone_id": int(feature["properties"].get("area_numbe")),
+                "zone_id_str": feature["properties"].get("area_numbe"),
+                "community": str(feature["properties"].get("community", "Unknown")).title(),
+            }
+            for feature in geojson["features"]
+            if feature["properties"].get("area_numbe") is not None
+        ]
+    )
 
 
 def pct_delta(current: float, previous: float | None) -> str | None:
@@ -112,22 +191,29 @@ with st.expander("About this project", expanded=False):
         **Current dataset:** {total_trips:,} trips aggregated into {total_hourly_rows:,} hourly zone rows across {total_zones} pickup zones. Available dates: **{date_min} to {date_max}** ({coverage_days:,} calendar days). The event module reports both before/after change and a simple difference-in-differences estimate using other pickup zones as controls.
         """
     )
-    metric_table = pd.DataFrame(
-        [
-            {"Metric": "Rows processed", "Value": f"{total_trips:,} raw trips / {total_hourly_rows:,} hourly rows"},
-            {"Metric": "Zones covered", "Value": f"{total_zones}"},
-            {"Metric": "Date coverage", "Value": f"{date_min} to {date_max}"},
-            {"Metric": "Model MAE", "Value": "not trained" if np.isnan(mae) else f"{mae:.2f} trips/hour"},
-            {"Metric": "Naive MAE", "Value": "not trained" if np.isnan(naive_mae) else f"{naive_mae:.2f} trips/hour"},
-            {"Metric": "Model R²", "Value": "not trained" if np.isnan(r2) else f"{r2:.3f}"},
-        ]
-    )
+    metric_table = pd.DataFrame([
+        {"Metric": "Rows processed", "Value": f"{total_trips:,} raw trips / {total_hourly_rows:,} hourly rows"},
+        {"Metric": "Zones covered", "Value": f"{total_zones}"},
+        {"Metric": "Date coverage", "Value": f"{date_min} to {date_max}"},
+        {"Metric": "Model MAE", "Value": "not trained" if np.isnan(mae) else f"{mae:.2f} trips/hour"},
+        {"Metric": "Naive MAE", "Value": "not trained" if np.isnan(naive_mae) else f"{naive_mae:.2f} trips/hour"},
+        {"Metric": "Model R²", "Value": "not trained" if np.isnan(r2) else f"{r2:.3f}"},
+    ])
     st.dataframe(metric_table, hide_index=True, width="stretch")
+
+try:
+    area_names = community_area_lookup()
+except Exception:
+    area_names = pd.DataFrame(columns=["zone_id", "zone_id_str", "community"])
 
 with st.sidebar:
     st.header("Filters")
-    zones = sorted(hourly["zone_id"].unique())
-    zone_id = st.selectbox("Pickup community area", zones, index=zones.index(8) if 8 in zones else 0)
+    zones = sorted(int(z) for z in hourly["zone_id"].unique())
+    zone_name_map = dict(zip(area_names["zone_id"], area_names["community"])) if not area_names.empty else {}
+    zone_options = [{"zone_id": zone, "label": f"{zone_name_map.get(zone, 'Community Area')} ({zone})"} for zone in zones]
+    default_idx = next((idx for idx, item in enumerate(zone_options) if item["zone_id"] == 8), 0)
+    selected_zone = st.selectbox("Pickup community area", zone_options, index=default_idx, format_func=lambda item: item["label"])
+    zone_id = selected_zone["zone_id"]
     st.caption(f"Data window: {date_min} → {date_max}")
     start_date = st.date_input("Start date", value=date_min, min_value=date_min, max_value=date_max, key="start_date")
     end_date = st.date_input("End date", value=date_max, min_value=date_min, max_value=date_max, key="end_date")
@@ -163,21 +249,33 @@ map_data = hourly[(hourly["datetime_hour"] >= start) & (hourly["datetime_hour"] 
 map_data["zone_id_str"] = map_data["zone_id"].astype(str)
 try:
     geojson = load_community_area_geojson()
+    area_lookup = community_area_lookup()[["zone_id_str", "community"]]
+    valid_area_ids = set(area_lookup["zone_id_str"])
+    map_data = map_data[map_data["zone_id_str"].isin(valid_area_ids)].merge(area_lookup, on="zone_id_str", how="left")
     fig_map = px.choropleth_mapbox(
         map_data,
         geojson=geojson,
         locations="zone_id_str",
         featureidkey="properties.area_numbe",
         color="trip_count",
-        color_continuous_scale="YlOrRd",
+        color_continuous_scale=[[0, "#d9dfd2"], [0.35, "#a3b19b"], [0.7, "#d48c46"], [1, "#9c4f24"]],
         mapbox_style="carto-positron",
-        zoom=9,
-        center={"lat": 41.8781, "lon": -87.6298},
-        opacity=0.72,
-        labels={"trip_count": "Trips"},
+        zoom=10.2,
+        center={"lat": 41.84, "lon": -87.68},
+        opacity=0.82,
+        labels={"trip_count": "Trips", "community": "Community area"},
+        hover_name="community",
+        hover_data={"zone_id_str": False, "trip_count": ":,", "community": False},
         title="Total trips by Chicago community area in selected date window",
     )
-    fig_map.update_layout(margin={"r": 0, "t": 42, "l": 0, "b": 0}, height=560)
+    fig_map.update_layout(
+        margin={"r": 0, "t": 42, "l": 0, "b": 0},
+        height=610,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font={"color": "#111111", "family": "Inter"},
+        coloraxis_colorbar={"title": {"text": "Trips", "font": {"color": "#111111"}}, "tickfont": {"color": "#111111"}},
+    )
     st.plotly_chart(fig_map, width="stretch")
 except Exception as exc:
     st.warning(f"Map could not load from Chicago boundary GeoJSON: {exc}")
@@ -209,15 +307,11 @@ if preds is not None:
     perf2.metric("Naive MAE", "n/a" if np.isnan(naive_mae) else f"{naive_mae:.2f}")
     perf3.metric("R²", f"{r2:.3f}" if not np.isnan(r2) else "n/a")
     perf4.metric("MAE improvement", "n/a" if np.isnan(mae_improvement) else f"{mae_improvement:+.1f}%")
-
-    comparison = pd.DataFrame(
-        [
-            {"Model": "Random forest", "MAE": mae, "RMSE": rmse, "R²": r2},
-            {"Model": "Naive previous-hour", "MAE": naive_mae, "RMSE": naive_rmse, "R²": naive_r2},
-        ]
-    )
+    comparison = pd.DataFrame([
+        {"Model": "Random forest", "MAE": mae, "RMSE": rmse, "R²": r2},
+        {"Model": "Naive previous-hour", "MAE": naive_mae, "RMSE": naive_rmse, "R²": naive_r2},
+    ])
     st.dataframe(comparison, hide_index=True, width="stretch")
-
     plot_limit = float(np.nanpercentile(np.concatenate([preds["trip_count"].values, preds["prediction"].values]), 99))
     scatter_df = preds[(preds["trip_count"] <= plot_limit) & (preds["prediction"] <= plot_limit)].copy()
     scatter = px.scatter(scatter_df, x="trip_count", y="prediction", title=f"Predicted vs. actual demand (clipped at 99th percentile: ≤{plot_limit:.0f} trips)", labels={"trip_count": "Actual trips", "prediction": "Predicted trips"}, opacity=0.45)
@@ -246,7 +340,6 @@ with impact_col3:
 st.caption(EVENT_PRESETS[event_label]["note"])
 impact = before_after_event_impact(hourly, str(event_date), zone_id=zone_id, window_days=window_days)
 did = difference_in_differences_event_impact(hourly, str(event_date), treated_zone_id=zone_id, window_days=window_days)
-
 metric_cols = st.columns(5)
 metric_cols[0].metric("Before avg", "n/a" if impact["before_avg_hourly_trips"] is None else f"{impact['before_avg_hourly_trips']:.1f}")
 metric_cols[1].metric("After avg", "n/a" if impact["after_avg_hourly_trips"] is None else f"{impact['after_avg_hourly_trips']:.1f}")
