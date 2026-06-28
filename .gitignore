@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+data/raw/*.csv
+data/processed/*.db
+models/*.pt
+models/*.pkl
+.DS_Store
+.streamlit/secrets.toml
